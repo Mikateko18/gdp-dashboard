@@ -63,23 +63,28 @@ if uploaded_file:
     # Perform calculations
     tax_rate = 0.27
 
-    gross_lending_margin = totals["Interest received"] - totals["Cost of Funds incl liquids"]
-    lending_margin_after_credit = (
+    gross_lending_margin = totals["Interest received"] + totals["Cost of Funds incl liquids"]
+    
+    Lending_margin_after_Credit_Premium = (
         gross_lending_margin +
         totals["Return on Capital Invested"] +
         totals["Credit Premium"]
     )
+    
     LIBT = (
-        lending_margin_after_credit +
-        totals["Other credit based fee income"] -
-        totals["Overheads"] -
-        totals["Additional Tier 1 Cost of Capital"] -
+        Lending_margin_after_Credit_Premium +
+        totals["Other credit based fee income"] +
+        totals["Overheads related to lending business"] +
+        totals["Additional Tier 1 Cost of Capital"] +
         totals["Tier 2 Cost of Capital"]
     )
+    
     taxation = LIBT * tax_rate
-    LIACC = LIBT - taxation - totals["Core equity capital holding"]
+    
+    LIACC = LIBT - taxation + totals["Core Equity Tier 1 Cost Of Capital"]
+    
     ROE = (
-        (LIACC / totals["Core equity capital holding"]) * 100
+        ((LIBT - taxation) / totals["Core equity capital holding"]) * 100
         if totals["Core equity capital holding"] != 0 else 0
     )
 
@@ -105,7 +110,7 @@ if uploaded_file:
         ],
         "Value": [
             gross_lending_margin,
-            lending_margin_after_credit,
+            Lending_margin_after_Credit_Premium,
             LIBT,
             taxation,
             LIACC,
