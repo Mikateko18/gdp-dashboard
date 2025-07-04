@@ -1,151 +1,139 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
+#Page config
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Income Statement App",
+    layout="wide"
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.title("Consolidated Income Statement App")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+#Upload section
+uploaded_file = st.file_uploader("Upload Income Statement File (.csv or .xlsx)", type=["csv", "xlsx"])
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+if uploaded_file:
+    # Read file
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Validate file
+    required_cols = {"Product", "Metric", "Value"}
+    if not required_cols.issubset(df.columns):
+        st.error(f" Uploaded file must contain columns: {required_cols}")
+        st.stop()
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    # Build product dictionaries
+    all_products = {}
+    for product in df["Product"].unique():
+        product_data = (
+            df[df["Product"] == product]
+            .set_index("Metric")["Value"]
+            .to_dict()
+        )
+        all_products[product] = product_data
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
+    # Sidebar: instructions & selection
+    with st.sidebar:
+        st.title("Instructions")
+        st.write("1. Upload your file above.")
+        st.write("2. Select one or more products.")
+        st.write("3. View metrics and charts.")
+        st.write("---")
+
+        products_available = list(all_products.keys())
+        selected_products = st.multiselect(
+            "Select products:",
+            products_available,
+            default=products_available
+        )
+
+    if not selected_products:
+        st.warning("Please select at least one product.")
+        st.stop()
+
+    # Compute totals
+    totals = {}
+    for prod in selected_products:
+        for key, val in all_products[prod].items():
+            totals[key] = totals.get(key, 0) + val
+
+    # Perform calculations
+    tax_rate = 0.27
+
+    gross_lending_margin = totals["Interest received"] - totals["Cost of Funds incl liquids"]
+    lending_margin_after_credit = (
+        gross_lending_margin +
+        totals["Return on Capital Invested"] +
+        totals["Credit Premium"]
+    )
+    LIBT = (
+        lending_margin_after_credit +
+        totals["Other credit based fee income"] -
+        totals["Overheads"] -
+        totals["Additional Tier 1 Cost of Capital"] -
+        totals["Tier 2 Cost of Capital"]
+    )
+    taxation = LIBT * tax_rate
+    LIACC = LIBT - taxation - totals["Core equity capital holding"]
+    ROE = (
+        (LIACC / totals["Core equity capital holding"]) * 100
+        if totals["Core equity capital holding"] != 0 else 0
     )
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    # Results section
+    st.write("---")
+    st.markdown(f"### Results for: {', '.join(selected_products)}")
 
-    return gdp_df
+    # Metrics dashboard
+    col1, col2, col3 = st.columns(3)
+    col1.metric(" Gross Lending Margin", f"{gross_lending_margin:,.0f}")
+    col2.metric(" LIBT", f"{LIBT:,.0f}")
+    col3.metric(" ROE (%)", f"{ROE:.2f}%")
 
-gdp_df = get_gdp_data()
+    # Detailed table
+    results_df = pd.DataFrame({
+        "Metric": [
+            "Gross Lending Margin",
+            "Lending Margin after Credit Premium",
+            "LIBT",
+            "Taxation",
+            "LIACC",
+            "ROE (%)"
+        ],
+        "Value": [
+            gross_lending_margin,
+            lending_margin_after_credit,
+            LIBT,
+            taxation,
+            LIACC,
+            ROE  # keep as number
+        ]
+    })
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+    st.write("---")
+    st.subheader("Detailed Results Table")
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+    st.dataframe(
+        results_df.style
+        .format({"Value": "{:,.2f}"})
+        .highlight_max(subset=["Value"], color='lightgreen')
+    )
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+    # Chart
+    chart_df = pd.DataFrame({
+        "Metric": ["Gross Lending Margin", "LIBT", "LIACC"],
+        "Value": [gross_lending_margin, LIBT, LIACC]
+    })
 
-# Add some spacing
-''
-''
+    st.write("---")
+    st.subheader("Key Metrics Chart")
+    st.bar_chart(chart_df.set_index("Metric"))
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+    st.write("---")
+    st.caption("Built with Python & Streamlit")
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+else:
+    st.info("Please upload a file to begin.")
